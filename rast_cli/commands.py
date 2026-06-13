@@ -517,7 +517,7 @@ def _do_update() -> None:
             "[yellow]This project is not a git repository.[/yellow]\n\n"
             "To enable automatic updates, initialise git and push to GitHub:\n\n"
             "  [cyan]git init\n"
-            "  git remote add origin https://github.com/YOUR_USER/RAST-CLI.git\n"
+            "  git remote add origin https://github.com/lazyv0rtex/RAST-CLI.git\n"
             "  git add -A && git commit -m 'initial commit'\n"
             "  git push -u origin main[/cyan]\n\n"
             "After that, [cyan]/update[/cyan] will pull and reinstall automatically."
