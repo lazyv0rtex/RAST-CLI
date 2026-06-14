@@ -6,6 +6,7 @@ overridden by environment variables (optionally loaded from a local ``.env``).
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 from dataclasses import asdict, dataclass, field
@@ -14,6 +15,20 @@ from typing import Any, Dict, Optional
 
 CONFIG_DIR = Path(os.path.expanduser("~")) / ".config" / "rast-cli"
 CONFIG_PATH = CONFIG_DIR / "config.json"
+SESSION_PATH = CONFIG_DIR / "last_session.json"
+HISTORY_PATH = CONFIG_DIR / "history.txt"
+
+
+def _obfuscate(value: str) -> str:
+    """Light obfuscation so the key isn't plain text in the config file."""
+    return base64.b64encode(value.encode()).decode()
+
+
+def _deobfuscate(value: str) -> str:
+    try:
+        return base64.b64decode(value.encode()).decode()
+    except Exception:
+        return value  # Already plain text (legacy)
 
 VALID_PROVIDERS = ("ollama", "openrouter")
 VALID_THINKING = ("low", "medium", "high")
@@ -83,25 +98,36 @@ PRESET_MODELS = {
 def _load_dotenv() -> None:
     """Minimal .env loader (no external dependency).
 
-    Looks for a ``.env`` file in the current working directory and loads any
-    keys that are not already present in the environment.
+    Looks for a ``.env`` file in the current working directory, then falls
+    back to any path saved in the config, so keys load from anywhere.
     """
-    dotenv_path = Path.cwd() / ".env"
-    if not dotenv_path.is_file():
-        return
+    candidates = [Path.cwd() / ".env"]
+    # Also load from saved env_file_path in config (if any).
     try:
-        for raw_line in dotenv_path.read_text(encoding="utf-8").splitlines():
-            line = raw_line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            key, _, value = line.partition("=")
-            key = key.strip()
-            value = value.strip().strip('"').strip("'")
-            if key and key not in os.environ:
-                os.environ[key] = value
-    except OSError:
-        # Silently ignore unreadable .env files; env vars remain usable.
+        raw = CONFIG_PATH.read_text(encoding="utf-8")
+        saved = json.loads(raw).get("env_file_path", "")
+        if saved:
+            candidates.append(Path(saved))
+    except Exception:
         pass
+
+    def _load_file(dotenv_path: Path) -> None:
+        try:
+            for raw_line in dotenv_path.read_text(encoding="utf-8").splitlines():
+                line = raw_line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                k, _, v = line.partition("=")
+                k = k.strip()
+                v = v.strip().strip('"').strip("'")
+                if k and k not in os.environ:
+                    os.environ[k] = v
+        except OSError:
+            pass
+
+    for dotenv_path in candidates:
+        if dotenv_path.is_file():
+            _load_file(dotenv_path)
 
 
 @dataclass
@@ -123,8 +149,12 @@ class Config:
     proxy_url: str = ""
     # Auto-commit file changes made by the agent
     autocommit: bool = False
-    # API keys — never persisted to disk; sourced from environment only.
+    # Saved path to .env so it loads from anywhere
+    env_file_path: str = ""
+    # Persisted keys (obfuscated, not encrypted — stored in user-only config)
     _openrouter_api_key: Optional[str] = field(default=None, repr=False)
+    _github_token: Optional[str] = field(default=None, repr=False)
+    _gmail_token: Optional[str] = field(default=None, repr=False)
 
     # ----- persistence -------------------------------------------------
     @classmethod
@@ -151,9 +181,21 @@ class Config:
             "gmail_enabled",
             "proxy_url",
             "autocommit",
+            "env_file_path",
         ):
             if key in data:
                 setattr(cfg, key, data[key])
+
+        # Load persisted keys (obfuscated in config).
+        if "openrouter_key" in data and data["openrouter_key"]:
+            cfg._openrouter_api_key = _deobfuscate(data["openrouter_key"])
+            os.environ.setdefault("OPENROUTER_API_KEY", cfg._openrouter_api_key)
+        if "github_token" in data and data["github_token"]:
+            cfg._github_token = _deobfuscate(data["github_token"])
+            os.environ.setdefault("GITHUB_TOKEN", cfg._github_token)
+        if "gmail_token" in data and data["gmail_token"]:
+            cfg._gmail_token = _deobfuscate(data["gmail_token"])
+            os.environ.setdefault("GMAIL_ACCESS_TOKEN", cfg._gmail_token)
 
         # Environment overrides take precedence for runtime values.
         cfg.ollama_host = os.environ.get("OLLAMA_HOST", cfg.ollama_host)
@@ -170,7 +212,10 @@ class Config:
         else:
             cfg.model = cfg.model or cfg.openrouter_model
 
-        cfg._openrouter_api_key = os.environ.get("OPENROUTER_API_KEY")
+        # Env var always wins over saved key.
+        env_key = os.environ.get("OPENROUTER_API_KEY")
+        if env_key:
+            cfg._openrouter_api_key = env_key
         # Auto-enable integrations if tokens are present in environment.
         if os.environ.get("GITHUB_TOKEN"):
             cfg.github_enabled = True
@@ -197,8 +242,18 @@ class Config:
             "gmail_enabled": self.gmail_enabled,
             "proxy_url": self.proxy_url,
             "autocommit": self.autocommit,
+            "env_file_path": self.env_file_path,
+            # Persisted keys — obfuscated, not encrypted.
+            "openrouter_key": _obfuscate(self._openrouter_api_key) if self._openrouter_api_key else "",
+            "github_token": _obfuscate(self._github_token) if self._github_token else "",
+            "gmail_token": _obfuscate(self._gmail_token) if self._gmail_token else "",
         }
         CONFIG_PATH.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        # Restrict config file permissions so other users can't read it.
+        try:
+            CONFIG_PATH.chmod(0o600)
+        except OSError:
+            pass
 
     # ----- helpers -----------------------------------------------------
     @property
@@ -242,9 +297,10 @@ class Config:
         self.save()
 
     def set_openrouter_key(self, key: str) -> None:
-        """Set the OpenRouter API key in the live environment (never written to disk)."""
+        """Set the OpenRouter API key and persist it to config."""
         os.environ["OPENROUTER_API_KEY"] = key
         self._openrouter_api_key = key
+        self.save()
 
     def set_ollama_host(self, host: str) -> None:
         self.ollama_host = host
@@ -263,7 +319,7 @@ class Config:
         self.save()
 
     def set_integration_token(self, service: str, token: str) -> None:
-        """Store an integration token in the live environment (never on disk)."""
+        """Store an integration token in the environment and persist to config."""
         env_map = {
             "github": "GITHUB_TOKEN",
             "gmail": "GMAIL_ACCESS_TOKEN",
@@ -273,8 +329,10 @@ class Config:
         os.environ[env_map[service]] = token
         if service == "github":
             self.github_enabled = True
+            self._github_token = token
         elif service == "gmail":
             self.gmail_enabled = True
+            self._gmail_token = token
         self.save()
 
     def to_dict(self) -> Dict[str, Any]:

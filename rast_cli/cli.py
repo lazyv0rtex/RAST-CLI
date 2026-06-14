@@ -7,13 +7,13 @@ import sys
 
 from prompt_toolkit import PromptSession
 from prompt_toolkit.formatted_text import HTML
-from prompt_toolkit.history import InMemoryHistory
+from prompt_toolkit.history import FileHistory, InMemoryHistory
 from prompt_toolkit.completion import WordCompleter
 
 from . import __version__, ui
 from .agent import Agent
 from .commands import handle_command
-from .config import Config, VALID_PROVIDERS
+from .config import Config, VALID_PROVIDERS, CONFIG_DIR, SESSION_PATH, HISTORY_PATH
 from .providers import ProviderError
 
 SLASH_COMMANDS = [
@@ -52,6 +52,7 @@ SLASH_COMMANDS = [
     "/connect gmail ",
     "/disconnect github",
     "/disconnect gmail",
+    "/resume",
 ]
 
 
@@ -123,8 +124,13 @@ def run() -> int:
     ui.print_status(config.provider, config.model, config.thinking, config.tools_enabled)
 
     # Build the session early so we can use it for the key prompt.
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    try:
+        _history = FileHistory(str(HISTORY_PATH))
+    except Exception:
+        _history = InMemoryHistory()
     session: PromptSession = PromptSession(
-        history=InMemoryHistory(),
+        history=_history,
         completer=WordCompleter(SLASH_COMMANDS, sentence=True, ignore_case=True),
     )
 
@@ -146,6 +152,20 @@ def run() -> int:
         on_assistant_text=ui.print_assistant,
         on_thinking=ui.print_thinking,
     )
+
+    # Offer to restore last session.
+    if SESSION_PATH.exists():
+        try:
+            import json as _json
+            saved = _json.loads(SESSION_PATH.read_text(encoding="utf-8"))
+            turn_count = sum(1 for m in saved if m.get("role") == "user")
+            if turn_count > 0:
+                ui.print_info(
+                    f"Last session available ([dim]{turn_count} turn(s)[/dim]). "
+                    "Type [cyan]/resume[/cyan] to restore it."
+                )
+        except Exception:
+            pass
 
     while True:
         try:
@@ -181,8 +201,22 @@ def run() -> int:
             config.provider,
         )
 
+    # Auto-save the conversation on exit.
+    _save_session(agent)
     ui.print_info("\nGoodbye.")
     return 0
+
+
+def _save_session(agent: "Agent") -> None:
+    """Save conversation messages to SESSION_PATH for /resume."""
+    try:
+        import json as _json
+        CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+        SESSION_PATH.write_text(
+            _json.dumps(agent.messages, indent=2), encoding="utf-8"
+        )
+    except Exception:
+        pass
 
 
 def main() -> None:

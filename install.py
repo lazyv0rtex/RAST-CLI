@@ -1,16 +1,3 @@
-#!/usr/bin/env python3
-"""Rast-CLI one-shot installer — works on macOS, Linux, and Windows.
-
-Usage:
-    python install.py
-
-What it does:
-  1. Checks Python >= 3.9
-  2. Creates a virtual environment in .venv/
-  3. Installs all dependencies
-  4. Makes 'rast' available globally (no sudo needed)
-  5. Optionally sets up a .env file with your API keys
-"""
 
 from __future__ import annotations
 
@@ -217,6 +204,26 @@ def _install_windows() -> None:
         say(f"  Or run directly: {RAST_EXE}", YELLOW)
 
 
+def _save_env_path_to_config(env_path: str) -> None:
+    """Persist the .env file path into the rast-cli config file."""
+    import json as _json
+    config_dir = Path.home() / ".config" / "rast-cli"
+    config_file = config_dir / "config.json"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    data: dict = {}
+    if config_file.exists():
+        try:
+            data = _json.loads(config_file.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    data["env_file_path"] = env_path
+    config_file.write_text(_json.dumps(data, indent=2), encoding="utf-8")
+    try:
+        config_file.chmod(0o600)
+    except OSError:
+        pass
+
+
 # ── Step 5 ────────────────────────────────────────────────────────────────────
 def setup_env() -> None:
     say("\n[5/5] Environment setup...", CYAN)
@@ -257,6 +264,8 @@ def setup_env() -> None:
             lines.append(f"{k}={v}")
         env_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
         say(f"  Saved {len(keys)} key(s) to .env", GREEN)
+        # Record the .env path in rast-cli config so it loads from anywhere.
+        _save_env_path_to_config(str(env_file.resolve()))
 
 
 # ── Summary ───────────────────────────────────────────────────────────────────

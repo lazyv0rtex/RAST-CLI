@@ -29,6 +29,7 @@ HELP_TEXT = """\
   [cyan]/key <openrouter-api-key>[/cyan]         Set the OpenRouter API key for this session
   [cyan]/credits[/cyan]                           Show OpenRouter account credit balance
   [cyan]/update[/cyan]                             Check for updates and apply them automatically
+  [cyan]/resume[/cyan]                             Restore your last conversation
   [cyan]/autocommit <on|off>[/cyan]                Auto git-commit every file change the agent makes
   [cyan]/integrations[/cyan]                       Show connected integrations (GitHub, Gmail)
   [cyan]/connect github <token>[/cyan]             Link your GitHub account
@@ -135,6 +136,10 @@ def handle_command(
 
     if cmd == "update":
         _do_update()
+        return CommandResult(handled=True)
+
+    if cmd == "resume":
+        _do_resume(agent)
         return CommandResult(handled=True)
 
     if cmd == "autocommit":
@@ -467,6 +472,30 @@ def _disconnect_integration(service: str, config: "Config", agent: "Agent") -> N
     config.save()
     agent.refresh()
     ui.print_info(f"[yellow]{service.capitalize()}[/yellow] disconnected.")
+
+
+def _do_resume(agent: "Agent") -> None:
+    import json
+    from .config import SESSION_PATH
+    if not SESSION_PATH.exists():
+        ui.print_info("No saved session found.")
+        return
+    try:
+        messages = json.loads(SESSION_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        ui.print_error(f"Could not load session: {exc}")
+        return
+    turn_count = sum(1 for m in messages if m.get("role") == "user")
+    if turn_count == 0:
+        ui.print_info("Saved session is empty.")
+        return
+    agent.messages = messages
+    # Ensure system prompt is fresh.
+    agent._reset_system()
+    ui.print_info(
+        f"[green]Resumed[/green] last session ([dim]{turn_count} turns[/dim]). "
+        "Continue where you left off."
+    )
 
 
 def _do_update() -> None:
