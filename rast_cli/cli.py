@@ -45,6 +45,8 @@ SLASH_COMMANDS = [
     "/settings proxy off",
     "/credits",
     "/update",
+    "/autocommit on",
+    "/autocommit off",
     "/integrations",
     "/connect github ",
     "/connect gmail ",

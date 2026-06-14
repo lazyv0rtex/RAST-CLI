@@ -29,6 +29,7 @@ HELP_TEXT = """\
   [cyan]/key <openrouter-api-key>[/cyan]         Set the OpenRouter API key for this session
   [cyan]/credits[/cyan]                           Show OpenRouter account credit balance
   [cyan]/update[/cyan]                             Check for updates and apply them automatically
+  [cyan]/autocommit <on|off>[/cyan]                Auto git-commit every file change the agent makes
   [cyan]/integrations[/cyan]                       Show connected integrations (GitHub, Gmail)
   [cyan]/connect github <token>[/cyan]             Link your GitHub account
   [cyan]/connect gmail <token>[/cyan]              Link your Gmail account
@@ -136,6 +137,17 @@ def handle_command(
         _do_update()
         return CommandResult(handled=True)
 
+    if cmd == "autocommit":
+        if not args:
+            state = "on" if config.autocommit else "off"
+            ui.print_info(f"Autocommit is currently [bold]{'[green]on' if config.autocommit else '[red]off'}[/bold]. Use /autocommit on|off to change.")
+        else:
+            enable = args[0].lower() in ("on", "true", "yes", "1")
+            config.autocommit = enable
+            config.save()
+            ui.print_info(f"Autocommit [bold]{'[green]enabled' if enable else '[red]disabled'}[/bold]. Agent file changes will {'be' if enable else 'not be'} committed automatically.")
+        return CommandResult(handled=True)
+
     if cmd == "integrations":
         _show_integrations(config, agent)
         return CommandResult(handled=True)
@@ -178,6 +190,7 @@ def _print_full_status(config: "Config", agent: "Agent") -> None:
     table.add_row("openrouter key", key_status)
     if config.proxy_url:
         table.add_row("proxy", f"[cyan]{config.proxy_url}[/cyan]")
+    table.add_row("autocommit", "[green]on[/green]" if config.autocommit else "[dim]off[/dim]")
     table.add_row("turns", str(agent.conversation_turns()))
     table.add_row("session tokens", str(agent.session_tokens))
     if config.provider == "openrouter":

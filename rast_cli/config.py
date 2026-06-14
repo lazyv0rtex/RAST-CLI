@@ -121,6 +121,8 @@ class Config:
     gmail_enabled: bool = False
     # Proxy URL for OpenRouter requests e.g. socks5://127.0.0.1:1080
     proxy_url: str = ""
+    # Auto-commit file changes made by the agent
+    autocommit: bool = False
     # API keys — never persisted to disk; sourced from environment only.
     _openrouter_api_key: Optional[str] = field(default=None, repr=False)
 
@@ -148,6 +150,7 @@ class Config:
             "github_enabled",
             "gmail_enabled",
             "proxy_url",
+            "autocommit",
         ):
             if key in data:
                 setattr(cfg, key, data[key])
@@ -193,6 +196,7 @@ class Config:
             "github_enabled": self.github_enabled,
             "gmail_enabled": self.gmail_enabled,
             "proxy_url": self.proxy_url,
+            "autocommit": self.autocommit,
         }
         CONFIG_PATH.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
