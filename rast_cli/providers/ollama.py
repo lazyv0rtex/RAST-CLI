@@ -1,4 +1,4 @@
-"""Ollama local inference provider (OpenAI-style tool calling)."""
+
 
 from __future__ import annotations
 
@@ -13,28 +13,17 @@ from .base import BaseProvider, ChatResponse, ProviderError, ToolCall
 class OllamaProvider(BaseProvider):
     name = "ollama"
 
+    # Models confirmed to not support tool calling — populated at runtime.
+    _no_tools_models: set = set()
+
     def __init__(self, host: str = "http://localhost:11434", model: str = "llama3") -> None:
         super().__init__(model)
         self.host = host.rstrip("/")
 
-    def chat(
-        self,
-        messages: List[Dict[str, Any]],
-        tools: Optional[List[Dict[str, Any]]] = None,
-        temperature: float = 0.7,
-    ) -> ChatResponse:
+    def _post(self, payload: Dict[str, Any]) -> requests.Response:
         url = f"{self.host}/api/chat"
-        payload: Dict[str, Any] = {
-            "model": self.model,
-            "messages": messages,
-            "stream": False,
-            "options": {"temperature": temperature},
-        }
-        if tools:
-            payload["tools"] = tools
-
         try:
-            resp = requests.post(url, json=payload, timeout=300)
+            return requests.post(url, json=payload, timeout=300)
         except requests.exceptions.ConnectionError as exc:
             raise ProviderError(
                 f"Could not connect to Ollama at {self.host}. "
@@ -42,6 +31,46 @@ class OllamaProvider(BaseProvider):
             ) from exc
         except requests.exceptions.Timeout as exc:
             raise ProviderError("Ollama request timed out.") from exc
+
+    def chat(
+        self,
+        messages: List[Dict[str, Any]],
+        tools: Optional[List[Dict[str, Any]]] = None,
+        temperature: float = 0.7,
+    ) -> ChatResponse:
+        payload: Dict[str, Any] = {
+            "model": self.model,
+            "messages": messages,
+            "stream": False,
+            "options": {"temperature": temperature},
+        }
+
+        # Skip tools entirely for models we already know don't support them.
+        use_tools = tools and self.model not in OllamaProvider._no_tools_models
+        if use_tools:
+            payload["tools"] = tools
+
+        resp = self._post(payload)
+
+        # Ollama returns 400 when a model doesn't support tool calling.
+        # Retry transparently without tools and remember for future calls.
+        if resp.status_code == 400 and use_tools:
+            err_text = resp.text or ""
+            if "does not support tools" in err_text:
+                OllamaProvider._no_tools_models.add(self.model)
+                payload.pop("tools", None)
+                resp = self._post(payload)
+                # Emit a one-time warning via the rich console.
+                try:
+                    from .. import ui as _ui
+                    _ui.console.print(
+                        f"\n[yellow]Note:[/yellow] [bold]{self.model}[/bold] does not support tool calling. "
+                        "Tools are disabled for this model. "
+                        "Switch to a tool-capable model (e.g. [cyan]qwen2.5-coder[/cyan], "
+                        "[cyan]llama3.1[/cyan]) to re-enable."
+                    )
+                except Exception:
+                    pass
 
         if resp.status_code == 404:
             raise ProviderError(
