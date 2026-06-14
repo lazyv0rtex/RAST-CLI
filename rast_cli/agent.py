@@ -162,6 +162,9 @@ class Agent:
             final_text = "[Reached max tool iterations; stopping.]"
             self.messages.append({"role": "assistant", "content": final_text})
 
+        if self.config.autocommit:
+            self._autocommit_turn(user_input)
+
         return final_text
 
     # ----- helpers -----------------------------------------------------
@@ -197,59 +200,50 @@ class Agent:
             return result_text
 
         self.on_tool_result(name, result.ok, result.output)
-
-        # Auto-commit: stage and commit the affected path after a successful
-        # file-mutating tool call, when the feature is enabled.
-        if result.ok and self.config.autocommit:
-            self._autocommit_tool(name, args)
-
         return result.output
 
-    _MUTATING_TOOLS = {"write_file", "edit_file", "make_dir", "delete_path", "move_path"}
-
-    def _autocommit_tool(self, tool_name: str, args: Dict[str, Any]) -> None:
-        """Stage and commit the file changed by a mutating tool."""
+    def _autocommit_turn(self, user_input: str) -> None:
+        """Stage all changes and commit with the user's prompt as the message."""
+        import re
         import subprocess
-        if tool_name not in self._MUTATING_TOOLS:
+        from pathlib import Path
+        cwd = str(Path.cwd())
+        # Only commit if we're inside a git repo.
+        check = subprocess.run(
+            ["git", "rev-parse", "--is-inside-work-tree"],
+            cwd=cwd, capture_output=True, text=True,
+        )
+        if check.returncode != 0:
             return
-        # Determine which path(s) to stage.
-        path = args.get("path") or args.get("destination") or "."
-        source = args.get("source")
-        msg_map = {
-            "write_file": f"rast: write {path}",
-            "edit_file": f"rast: edit {path}",
-            "make_dir": f"rast: mkdir {path}",
-            "delete_path": f"rast: delete {path}",
-            "move_path": f"rast: move {source} -> {path}",
-        }
-        commit_msg = msg_map.get(tool_name, f"rast: {tool_name}")
-        cwd = str(__import__('pathlib').Path.cwd())
-        paths_to_add = [p for p in [path, source] if p]
-        try:
-            subprocess.run(
-                ["git", "add"] + paths_to_add,
-                cwd=cwd, capture_output=True,
-            )
-            result = subprocess.run(
-                ["git", "commit", "-m", commit_msg],
-                cwd=cwd, capture_output=True, text=True,
-            )
-            if result.returncode == 0:
-                sha = ""
-                # Extract short SHA from commit output e.g. "[main abc1234]"
-                import re
-                m = re.search(r'\[\S+ ([0-9a-f]+)\]', result.stdout)
-                if m:
-                    sha = f" ({m.group(1)})"
-                try:
-                    from . import ui as _ui
-                    _ui.console.print(
-                        f"[dim]autocommit:[/dim] [green]{commit_msg}[/green]{sha}"
-                    )
-                except Exception:
-                    pass
-        except (FileNotFoundError, OSError):
-            pass  # git not available — silently skip
+        # Check if there is anything to commit.
+        status = subprocess.run(
+            ["git", "status", "--porcelain"],
+            cwd=cwd, capture_output=True, text=True,
+        )
+        if not status.stdout.strip():
+            return  # Nothing changed — skip.
+        # Build a clean commit message from the user's prompt (max 72 chars).
+        summary = user_input.strip().replace("\n", " ")
+        if len(summary) > 72:
+            summary = summary[:69] + "..."
+        commit_msg = f"rast: {summary}"
+        subprocess.run(["git", "add", "-A"], cwd=cwd, capture_output=True)
+        result = subprocess.run(
+            ["git", "commit", "-m", commit_msg],
+            cwd=cwd, capture_output=True, text=True,
+        )
+        if result.returncode == 0:
+            sha = ""
+            m = re.search(r'\[\S+ ([0-9a-f]+)\]', result.stdout)
+            if m:
+                sha = f" ({m.group(1)})"
+            try:
+                from . import ui as _ui
+                _ui.console.print(
+                    f"[dim]autocommit:[/dim] [green]{commit_msg}[/green]{sha}"
+                )
+            except Exception:
+                pass
 
     def conversation_turns(self) -> int:
         """Number of user turns in the conversation (excluding system message)."""
