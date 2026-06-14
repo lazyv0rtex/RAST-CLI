@@ -70,35 +70,35 @@ def install_deps() -> None:
 
 
 def install_command() -> None:
-    say("\n[4/5] Installing 'rash' command...", CYAN)
-    rash_src = BIN / "rash"
-    if not rash_src.exists():
-        say(f"  ERROR: {rash_src} not found. Did pip install succeed?", RED)
+    say("\n[4/5] Installing 'rast' command...", CYAN)
+    rast_src = BIN / "rast"
+    if not rast_src.exists():
+        say(f"  ERROR: {rast_src} not found. Did pip install succeed?", RED)
         sys.exit(1)
 
     if platform.system() == "Windows":
         say("  Windows detected: add this folder to PATH manually:", YELLOW)
         say(f"    {BIN}", YELLOW)
-        say("  Or run directly: .venv\\Scripts\\rash.exe", YELLOW)
+        say("  Or run directly: .venv\\Scripts\\rast.exe", YELLOW)
         return
 
-    target = GLOBAL_BIN / "rash"
+    target = GLOBAL_BIN / "rast"
     try:
         if target.exists() or target.is_symlink():
             target.unlink()
-        target.symlink_to(rash_src)
-        say(f"  Linked {rash_src} → {target}", GREEN)
+        target.symlink_to(rast_src)
+        say(f"  Linked {rast_src} → {target}", GREEN)
     except PermissionError:
         say("  Permission denied. Trying with sudo...", YELLOW)
         try:
             subprocess.run(
-                ["sudo", "ln", "-sf", str(rash_src), str(target)],
+                ["sudo", "ln", "-sf", str(rast_src), str(target)],
                 check=True,
             )
             say(f"  Linked (via sudo): {target}", GREEN)
         except subprocess.CalledProcessError:
             say("  Could not install globally. You can still run:", YELLOW)
-            say(f"    source .venv/bin/activate && rash", YELLOW)
+            say(f"    source .venv/bin/activate && rast", YELLOW)
 
 
 def setup_env() -> None:
@@ -153,10 +153,10 @@ def print_summary() -> None:
     say(f"\n{BOLD}{'='*50}{RESET}")
     say(f"{BOLD}{GREEN}  Rast-CLI installed successfully!{RESET}")
     say(f"{BOLD}{'='*50}{RESET}\n")
-    say("  Run from anywhere:    rash", CYAN)
-    say("  With provider:        rash --provider openrouter", CYAN)
-    say("  With model:           rash -p openrouter -m deepseek/deepseek-r1", CYAN)
-    say("\n  First-time setup inside rash:", CYAN)
+    say("  Run from anywhere:    rast", CYAN)
+    say("  With provider:        rast --provider openrouter", CYAN)
+    say("  With model:           rast -p openrouter -m deepseek/deepseek-r1", CYAN)
+    say("\n  First-time setup inside rast:", CYAN)
     say("    /connect github ghp_yourToken", CYAN)
     say("    /connect gmail ya29.yourToken", CYAN)
     say("    /key sk-or-v1-yourOpenRouterKey", CYAN)
