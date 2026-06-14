@@ -1,4 +1,5 @@
-# 
+#   openrouter type shit
+                
 
 from __future__ import annotations
 
@@ -122,6 +123,14 @@ class OpenRouterProvider(BaseProvider):
             raise ProviderError(
                 "OpenRouter rejected the API key (401 Unauthorized). "
                 "Use /key <your-key> to update it."
+            )
+        if resp.status_code == 403:
+            raise ProviderError(
+                f"Model '{self.model}' is not available in your region (403). "
+                "Try a different model: /use deepseek/deepseek-chat  "
+                "or /use google/gemini-2.0-flash-001\n"
+                "To use Claude from Hong Kong, set a proxy: "
+                "/settings proxy socks5://127.0.0.1:1080"
             )
         if resp.status_code == 402:
             raise ProviderError(
